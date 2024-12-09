@@ -1,0 +1,362 @@
+---
+title: "CSCI4210U - Final Assignment - Exploratory Data Analysis on Tech Layoffs (2020-2024)"
+author: "Ajmain Khan - 100746641"
+date: "2024-04-01"
+output: 
+  html_document:
+    toc: true
+    toc_depth: 3
+    toc_float: true
+    number_sections: true
+    theme: flatly
+    code_folding: hide
+---
+
+# Introduction
+The tech industry has witnessed fluctuations in employment trends due to various factors, including economic downturns, shifts in technology, and company restructuring. The COVID-19 pandemic, in particular, contributed significantly to mass layoffs. This exploratory data analysis seeks to understand the trends in tech layoffs from 2020 to 2024 and assess the recovery of the tech job market from the post-pandemic era.
+
+Some questions we seek to explore are:
+
+1.  ***When were tech layoffs at their peak?***
+2.  ***Is there an observable trend indicating recovery from mass layoffs?***
+3.  ***Were layoffs a global phenomenon, or were they concentrated in specific regions?***
+4.  ***Which companies and industries experienced the most significant layoffs?***
+
+## Layoffs Dataset
+The dataset from Kaggle includes detailed global information on tech layoffs from 2020 to 2024, such as company names, layoff dates, and the number of employees affected. By conducting Exploratory Data Analysis (EDA) on this data, we aim to uncover patterns and trends that characterize the tech industry's employment dynamics.
+
+**Features of the data include:**
+
+- ID: A unique identifier.
+- Company: Name of the company.
+- Location_HQ: Headquarters location (Province/State).
+- Country: Country of headquarters.
+- Continent: Continent of headquarters.
+- Laid_Off: Number of people laid off.
+- Date_layoffs: Date of layoffs.
+- Percentage: Layoffs compared to total company size.
+- Company_Size_before_Layoffs: Size before layoffs.
+- Company_Size_after_layoffs: Size after layoffs.
+- Industry: Industry category of the company.
+- Year: Year of layoffs.
+- lat: Latitude of headquarters.
+- lng: Longitude of headquarters.
+
+While the current dataset does not encompass economic factors, it provides a foundational framework for interpreting the observed layoff trends. By correlating these data with historical economic and market trends, as well as insights from contemporary news media, a more comprehensive analysis can be constructed. This study serves as a preliminary investigation, setting the stage for future research that integrates a broader spectrum of data to elucidate the multifaceted causes behind the fluctuations in tech industry employment.
+
+*Financial figures are omitted due to their unreliable sourcing and applicability.*
+
+```{r setup, echo=FALSE, warning = FALSE, message = FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+library(tidyverse)
+library(sf)
+library(readxl)
+library(ggthemes)
+library(scales)
+library(maps)
+library(leaflet) # For interactive mapping
+library(leaflet.extras)
+library(rnaturalearth)
+library(rnaturalearthdata)
+```
+
+# Data Loading and Cleaning
+
+We'll begin by loading the dataset and preparing it for analysis, ensuring it is free of null values and formatted correctly.
+```{r data}
+# Loading the dataset
+path <- "G:/Other computers/My Computer/Year5_Winter_2024/CSCI 4210U - Information Visualization/Assignments/Final Assignment"
+dataset_file <- "tech_layoffs.xlsx"
+layoffs_data <- read_excel(file.path(path, dataset_file))
+
+layoffs_data
+
+# Clean and preprocess the data
+layoffs_processed <- layoffs_data %>%
+  select(-'Money_Raised_in_$_mil', -Stage) %>% # Drop unused columns
+  drop_na(Company, Laid_Off, Date_layoffs, Industry) %>% # Drop NAs in relevant columns
+  # na.omit() %>%
+  mutate(
+    Date_layoffs = as.Date(Date_layoffs), # Ensure correct date format
+    # Date_layoffs = as.Date(Date_layoffs, "%Y-%m-%d"),
+    Industry = na_if(Industry, "Transport…"),
+    Industry = na_if(Industry, "Infrastruc…"),
+    Industry = na_if(Industry, "Manufact…"),
+    # Industry = ifelse(Industry == "Transport…", "Transportation", Industry), # Fix Unicode issue
+    # Industry = ifelse(Industry == "Infrastruc…", "Infrastructure", Industry)
+    Year = year(Date_layoffs)
+  ) %>%
+  replace_na(list(Industry = "Unknown"))
+
+layoffs_processed
+
+```
+
+# Analysis and Evaluation
+To understand the layoff trends over the past 4 years, we will examine the annual and monthly patterns, as well as the distribution by company, industry, and country.
+
+## Annual Layoff Trends Over Time
+``` {r trends_over_time_years}
+# Summarize layoffs by year
+layoffs_yearly <- layoffs_processed %>%
+  count(Year, wt = Laid_Off, name = "Total_Laid_Off")
+
+# Line Plot of Yearly Layoff Trends
+ggplot(layoffs_yearly, aes(x = Year, y = Total_Laid_Off)) +
+  geom_line() +
+  geom_point() +
+  theme_fivethirtyeight() +
+  geom_text(aes(label = Total_Laid_Off), vjust = -0.6) +
+  scale_x_continuous(breaks = 2020:2024) +
+  labs(title = "Yearly Tech Layoff Trends (2020-2024)",
+       x = "Year",
+       y = "Total Layoffs")
+```
+
+### Overall Layoff Distribution
+The following visualization will gives us an idea of which years, over the layoff data timespan, had the most layoffs. As well as the total percentage of layoffs that occured that year in contrast to the net total of all years.
+```{r overall_layoff_distribution}
+# Piechart, Layoff Distribution over 2020-2024 out of net total layoffs, pie slices labelled with % of share of layoffs, legend with years, no y_scale
+
+# Calculate the total layoffs for each year
+total_layoffs_by_year <- layoffs_processed %>%
+  group_by(Year) %>%
+  summarise(Total_Laid_Off = sum(Laid_Off)) %>%
+  ungroup()
+
+# Calculate the percentage of layoffs for each year based on the total
+total_layoffs_by_year <- total_layoffs_by_year %>%
+  mutate(Percentage = Total_Laid_Off / sum(Total_Laid_Off) * 100)
+
+# Create a pie chart with labels around the perimeter
+ggplot(total_layoffs_by_year, aes(x = "", y = Total_Laid_Off, fill = as.factor(Year))) +
+  geom_bar(stat = "identity", width = 1) +
+  coord_polar("y", start = 0) +
+  geom_label(aes(label = paste(round(Percentage, 1), "%", "\n", Total_Laid_Off)), position = position_stack(vjust = 0.7), size = 3, show.legend=FALSE) +
+  scale_fill_brewer(palette = "Set3", name = "Year") +
+  labs(title = "Overall Layoff Distribution (2020-2024)", x = NULL, y = NULL) +
+  theme_few() +
+  theme(legend.position = "right",
+        plot.title = element_text(size = 16, face = "bold"),
+        legend.title = element_text(size = 12),
+        legend.text = element_text(size = 10),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid  = element_blank())
+```
+
+### Monthly Layoff Trends [2020 - 2024]
+
+```{r trends_over_time_monthly_annual, fig.width=12, fig.height=8}
+annual_layoffs <- layoffs_processed %>%
+  mutate(Year = year(Date_layoffs),
+         Month = month(Date_layoffs, label = TRUE)) %>%
+  group_by(Year, Month) %>%
+  summarise(Total_Laid_Off = sum(Laid_Off), .groups = 'drop') %>%
+  arrange(Year, Month)
+
+ggplot(annual_layoffs, aes(x = Month, y = Total_Laid_Off, group = Year)) +
+  geom_line() +
+  geom_point() +
+  geom_text(aes(label = Total_Laid_Off), vjust = -0.5, check_overlap = TRUE, size = 3) +
+  scale_x_discrete(limits = levels(annual_layoffs$Month)) +
+  expand_limits(y = c(0, max(annual_layoffs$Total_Laid_Off) * 1.08)) +
+  labs(title = "Monthly Tech Layoff Trends Per Annum", x = "Month", y = "Total Layoffs") +
+  theme_fivethirtyeight() +
+  theme(
+    axis.text.x = element_text(angle = 45, hjust = 1, size = 8),
+    panel.spacing = unit(2, "lines"),
+  ) +
+  facet_wrap(~Year, scales = "free", ncol = 2)
+```
+
+### Obeservations:
+The visualizations reveal a concerning trend, with 2022 and 2023 experiencing a significant spike in layoffs compared to previous years. This period saw a particularly harsh climate for tech employees, with layoffs remaining stubbornly high well into 2023. However, based on Q1 2024 data, there seems to be a tentative downward trend, suggesting a possible recovery in the job market.
+
+## Company Layoff Statistics
+### Top 10 Companies That Laid Off Overall
+``` {r top_companies_layoff_overall}
+# Aggregate layoffs by company over all years
+top_companies_overall <- layoffs_processed %>%
+  group_by(Company) %>%
+  summarise(Total_Laid_Off = sum(Laid_Off)) %>%
+  ungroup() %>%
+  arrange(desc(Total_Laid_Off))
+
+# Select the top 10 companies
+top_10_companies <- head(top_companies_overall, 10)
+
+# Calculate the total layoffs for labeling
+total_layoffs <- sum(top_companies_overall$Total_Laid_Off)
+
+# Calculate the percentage of total layoffs for each of the top 10 companies
+top_10_companies <- top_10_companies %>%
+  mutate(Percentage = Total_Laid_Off / total_layoffs * 100,
+         Label = paste(Total_Laid_Off, " (", round(Percentage, 1), "%)", sep = ""))
+
+# Create the pie chart
+ggplot(top_10_companies, aes(x = "", y = Total_Laid_Off, fill = Company)) +
+  geom_bar(stat = "identity", width = 1, color = "white") +
+  coord_polar("y", start = 0) +
+  geom_label(aes(label = Label), position = position_stack(vjust = 0.5), size = 3,  show.legend=FALSE) +
+  scale_fill_hue() +
+  labs(title = "Layoffs Distribution Among Top 10 Companies", x = NULL, y = NULL) +
+  theme_igray() +
+  theme(legend.position = "right",
+        plot.title = element_text(size = 16, face = "bold"),
+        legend.title = element_text(size = 12),
+        axis.text = element_blank(),
+        axis.ticks = element_blank(),
+        panel.grid  = element_blank())
+
+```
+
+### Top 10 Companies Laying off Per Year
+Here we visualize a clustered bar chart showing the top 5 companies for each year, from 2020-2024, that had the most layoffs.
+``` {r top_companies_layoff_per_year, fig.height=6}
+# Calculate the top 5 companies that laid off the most each year
+top_companies_by_year <- layoffs_processed %>%
+  group_by(Year, Company) %>%
+  summarise(Total_Laid_Off = sum(Laid_Off), .groups = 'drop') %>%
+  arrange(Year, desc(Total_Laid_Off)) %>%
+  group_by(Year) %>%
+  slice_max(Total_Laid_Off, n = 5) %>%
+  ungroup()
+
+# Create a horizontal clustered bar chart
+ggplot(top_companies_by_year, aes(x = reorder(Company, Total_Laid_Off), y = Total_Laid_Off, fill = as.factor(Year))) +
+  geom_bar(stat = "identity", position = position_dodge2(preserve = "single", width = 0.9), width = 0.9) + # Maintain even bar spacing
+  coord_flip() +
+  geom_text(aes(label = Total_Laid_Off), 
+            position = position_dodge2(preserve = "single", width = 0.9), 
+            hjust = -0.2,
+            vjust = 0.3,
+            size = 2.5) +
+  scale_fill_brewer(palette = "Paired", name = "Year") +
+  labs(title = "Top 5 Companies with Highest Layoffs per Year (2020-2024)",
+       x = "Number of Layoffs",
+       y = "Company") +
+  theme_stata() +
+  theme(legend.position = "bottom",
+        axis.text.y = element_text(angle = 0, hjust = 1),
+        plot.title = element_text(size = 14, face = "bold"),
+        axis.title.x = element_text(size = 12),
+        axis.title.y = element_text(size = 12),
+        legend.title = element_text(size = 12))
+```
+
+### Average Company Size Pre/Post Layoff Among Top 10 Companies
+A visualization via a stacked bar chart of top 10 companies indicating average company size before and after layoffs, gives us meaningful insight into how much companies have downsized relative to their overall employee base.
+``` {r avg_company_size_pre_post_layoff}
+# Calculate average company size before and after layoff for top 10 companies
+avg_company_size <- top_companies_overall %>%
+  left_join(layoffs_processed, by = "Company") %>%
+  group_by(Company) %>%
+  summarise(Avg_Size_Before = mean(Company_Size_before_Layoffs),
+            Avg_Size_After = mean(Company_Size_after_layoffs)) %>%
+  top_n(10, Avg_Size_Before)
+
+# Create a stacked bar chart
+ggplot(avg_company_size, aes(x = Company)) +
+  geom_bar(aes(y = Avg_Size_Before, fill = "Before Layoff"), stat = "identity", color = "black") +
+  geom_bar(aes(y = Avg_Size_After, fill = "After Layoff"), stat = "identity", color = "black") +
+  labs(title = "Average Company Size Pre/Post Layoff Among Top 10 Companies", x = "Company", y = "Average Company Size") +
+  scale_fill_manual(values = c("Before Layoff" = "lightblue", "After Layoff" = "red")) +
+  scale_y_continuous(
+    labels = comma,
+    breaks = seq(0,
+                 max(avg_company_size$Avg_Size_Before, avg_company_size$Avg_Size_After),
+                 by = 50000)
+    ) +
+  theme_dark() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 1)) +
+  guides(fill = guide_legend(title = "Company Size"))
+```
+
+### Industry Sector Layoff Distribution
+Further analysis focuses on the distribution of layoffs among specific industries in the tech space. This graphic will allow us to visualize the industries most/least severely impacted by layoffs.
+``` {r industry_layoff_distribution, fig.width=12, fig.height=8}
+# Calculate layoffs by industry
+industry_layoffs <- layoffs_processed %>%
+  group_by(Industry) %>%
+  summarise(Total_Laid_Off = sum(Laid_Off)) %>%
+  ungroup() %>%
+  arrange(desc(Total_Laid_Off))
+
+format_labels_k <- function(x) {
+  paste0(scales::comma_format()(x / 1000), "k")
+}
+
+ggplot(industry_layoffs, aes(x = reorder(Industry, Total_Laid_Off), y = Total_Laid_Off, fill = Industry)) +
+  geom_bar(stat = "identity", width = 0.9, position = position_dodge(0.7)) +
+  labs(title = "Industry Layoff Distribution", x = "Industry", y = "Total Layoffs") +
+  theme_minimal() +
+  theme(axis.text.x = element_text(angle = 45, hjust = 0.8),
+        legend.key.size = unit(0.6, "cm")) +   # Reduce legend size
+  scale_fill_viridis_d() +
+  scale_y_continuous(labels = format_labels_k) +
+  guides(fill = guide_legend(ncol = 1))
+```
+
+### Observations:
+The analysis identifies the sectors most impacted by layoffs. Industries like Retail and Consumer facing sectors stand out with a disproportionately high share of layoffs. This might be due to factors like reduced demand during lockdown, increased automation in industry, or saturation in the market for consumer products. It's crucial to investigate the specific reasons behind these trends to understand how these industries can adapt and mitigate future layoffs.
+
+## Geographic Distribution of Layoffs
+A choropleth map provides a visual representation of layoffs aggregated by country.
+``` {r geographic_distribution_layoffs}
+# Aggregate the data by country
+country_layoffs <- layoffs_processed %>%
+  group_by(Country) %>%
+  summarise(Total_Laid_Off = sum(Laid_Off, na.rm = TRUE))
+
+# Rename USA to match with the country identifiers in the world map spatial data
+country_layoffs$Country <- recode(country_layoffs$Country, `USA` = "United States of America")
+
+# Load world map spacial data
+countries_sf <- ne_countries(scale = "medium", returnclass = "sf")
+
+# Merge layoff data with the spatial data on Country name
+merged_data <- merge(countries_sf, country_layoffs, by.x = "name", by.y = "Country")
+
+cpalette <- colorNumeric(palette = "YlOrRd", domain = merged_data$Total_Laid_Off)
+
+# Create the interactive choropleth map
+leaflet(merged_data) %>%
+  addProviderTiles(providers$CartoDB.Positron) %>%
+  addPolygons(fillColor = ~cpalette(Total_Laid_Off),
+              fillOpacity = 0.8, color = "#BDBDC3", weight = 1,
+              popup = ~paste(name, "Total Layoffs: ", Total_Laid_Off)) %>%
+  addLegend(pal = cpalette, values = ~Total_Laid_Off, opacity = 0.7, title = "Total Layoffs",
+            position = "bottomright")
+```
+
+### Observation:
+
+The choropleth map highlights the concentration of layoffs in North America. However, it's important to acknowledge limitations of this visualization. It doesn't show the distribution of layoffs within countries, and countries with larger tech markets might naturally have higher total layoff numbers. Further analysis that considers the relative size of tech sectors within each country would provide a more nuanced picture.
+
+---
+
+# Discussion
+**Answering Introduction Questions:**
+
+1. ***When were tech layoffs at their peak?***
+  - The visualizations suggest 2022 and 2023 had the most layoffs.
+
+2. ***Is there an observable trend indicating recovery from mass layoffs?***
+  - While data for 2024 is limited, there's a tentative downward trend in layoffs, suggesting a possible recovery.
+
+3. ***Were layoffs a global phenomenon, or were they concentrated in specific regions?***
+  - Layoffs seem concentrated in North America, but further analysis is needed to account for market size variations.
+
+4. ***Which companies and industries experienced the most significant layoffs?***
+  - Companies and Industries: The top companies with the most layoffs are identified in the analysis, these predominantly include Big-Tech companies such as Google, Amazon, Meta, and the like. Industry-wise, the analysis points towards sectors most affected by layoffs being Retail, Consumer, Transportation and Finance sectors.
+
+Our findings indicate a volatile tech job market, with peaks corresponding to economic downturns and a slow recovery post-pandemic. The data suggests that large tech companies, particularly in North America, implemented significant layoffs. These actions reflect not just isolated economic reactions but a broader industry trend towards recalibrating workforce size in response to market demand and technological advancements.
+The year-over-year trend shows a slow and gradual recovery from the peak pandemic layoffs. Companies with the highest number of layoffs we're unsurprisingly the largest tech companies, and also subsequently had a comparatively high number of employees, indicating that these companies over estimated their growth and we're (unnecessarily) holding onto technical talent. The geographic distribution points towards the problem being highly concentrated within North America, suggesting the problem being somewhat isolated, however we should consider the relative size of tech markets within countries before coming to a conclusion on this conjecture.
+
+# Conclusion
+The analysis offers insights into the tech industry's employment dynamics from 2020 to 2024. We've identified patterns of layoffs, highlighting a tentative recovery in the job market. This analysis sheds light on past and present trends, identifying companies and industries most affected by layoffs. However, it's important to acknowledge limitations of the data source (e.g., might not capture all layoffs).
+Future research could involve comparing layoffs with economic indicators to understand the underlying causes in more detail. Additionally, investigating the impact of layoffs on specific employee demographics could provide valuable insights for policy decisions or targeted support programs.
+
+# References
+Kaggle Dataset, "Tech Layoffs 2020-2024": https://www.kaggle.com/datasets/ulrikeherold/tech-layoffs-2020-2024/data
